@@ -20,11 +20,11 @@ from matcha.utils.model import (
 log = utils.get_pylogger(__name__)
 
 
-class MatchaTTS(BaseLightningClass):  # 🍵
+class MatchaTTS(BaseLightningClass):  # 🍵🧋
     def __init__(
         self,
         n_vocab,
-        n_spks,
+        spk_in_dim,
         spk_emb_dim,
         n_feats,
         encoder,
@@ -42,22 +42,23 @@ class MatchaTTS(BaseLightningClass):  # 🍵
         self.save_hyperparameters(logger=False)
 
         self.n_vocab = n_vocab
-        self.n_spks = n_spks
         self.spk_emb_dim = spk_emb_dim
+        self.spk_in_dim = spk_in_dim  # 192
         self.n_feats = n_feats
         self.out_size = out_size
         self.prior_loss = prior_loss
         self.use_precomputed_durations = use_precomputed_durations
 
-        if n_spks > 1:
-            self.spk_emb = torch.nn.Embedding(n_spks, spk_emb_dim)
+        self.spk_emb = torch.nn.Sequential(
+            torch.nn.Linear(spk_in_dim, spk_emb_dim),
+            torch.nn.ReLU(),  # TODO change activation function.
+        )
 
         self.encoder = TextEncoder(
             encoder.encoder_type,
             encoder.encoder_params,
             encoder.duration_predictor_params,
             n_vocab,
-            n_spks,
             spk_emb_dim,
         )
 
@@ -66,7 +67,6 @@ class MatchaTTS(BaseLightningClass):  # 🍵
             out_channel=encoder.encoder_params.n_feats,
             cfm_params=cfm,
             decoder_params=decoder,
-            n_spks=n_spks,
             spk_emb_dim=spk_emb_dim,
         )
 
@@ -111,9 +111,8 @@ class MatchaTTS(BaseLightningClass):  # 🍵
         # For RTF computation
         t = dt.datetime.now()
 
-        if self.n_spks > 1:
-            # Get speaker embedding
-            spks = self.spk_emb(spks.long())
+        # Get speaker embedding
+        spks = self.spk_emb(spks)
 
         # Get encoder_outputs `mu_x` and log-scaled token durations `logw`
         mu_x, logw, x_mask = self.encoder(x, x_lengths, spks)
@@ -139,7 +138,7 @@ class MatchaTTS(BaseLightningClass):  # 🍵
         decoder_outputs = decoder_outputs[:, :, :y_max_length]
 
         t = (dt.datetime.now() - t).total_seconds()
-        rtf = t * 22050 / (decoder_outputs.shape[-1] * 256)
+        rtf = t * 24000 / (decoder_outputs.shape[-1] * 480)
 
         return {
             "encoder_outputs": encoder_outputs,
@@ -171,9 +170,9 @@ class MatchaTTS(BaseLightningClass):  # 🍵
             spks (torch.Tensor, optional): speaker ids.
                 shape: (batch_size,)
         """
-        if self.n_spks > 1:
-            # Get speaker embedding
-            spks = self.spk_emb(spks)
+        # TODO: speaker embedding 처리
+        # Get speaker embedding
+        spks = self.spk_emb(spks)
 
         # Get encoder_outputs `mu_x` and log-scaled token durations `logw`
         mu_x, logw, x_mask = self.encoder(x, x_lengths, spks)
